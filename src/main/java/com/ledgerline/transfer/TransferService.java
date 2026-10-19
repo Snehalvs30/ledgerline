@@ -3,6 +3,10 @@ package com.ledgerline.transfer;
 import com.ledgerline.account.Account;
 import com.ledgerline.account.AccountNotFoundException;
 import com.ledgerline.account.AccountRepository;
+import com.ledgerline.idempotency.IdempotencyKeyReusedException;
+import com.ledgerline.idempotency.IdempotencyRecord;
+import com.ledgerline.idempotency.IdempotencyRecordRepository;
+import com.ledgerline.idempotency.InvalidIdempotencyKeyException;
 import com.ledgerline.ledger.JournalEntry;
 import com.ledgerline.ledger.JournalEntryRepository;
 import com.ledgerline.ledger.Posting;
@@ -19,24 +23,63 @@ import java.util.stream.Collectors;
 @Service
 public class TransferService {
 
+    private static final int MAX_KEY_LENGTH = 255;
+
     private final AccountRepository accountRepository;
     private final JournalEntryRepository journalEntryRepository;
     private final PostingRepository postingRepository;
+    private final IdempotencyRecordRepository idempotencyRepository;
 
     public TransferService(AccountRepository accountRepository,
                            JournalEntryRepository journalEntryRepository,
-                           PostingRepository postingRepository) {
+                           PostingRepository postingRepository,
+                           IdempotencyRecordRepository idempotencyRepository) {
         this.accountRepository = accountRepository;
         this.journalEntryRepository = journalEntryRepository;
         this.postingRepository = postingRepository;
+        this.idempotencyRepository = idempotencyRepository;
     }
 
     /**
-     * Everything here runs in ONE database transaction: either all of it is
-     * saved, or none of it is.
+     * Runs in ONE transaction: claiming the key, moving the money and recording the
+     * result are saved together, or not at all.
+     *
+     * If the transfer fails (e.g. insufficient funds), the whole transaction rolls back,
+     * including the key. A retry with the same key is then evaluated again from scratch.
+     * We only remember successful transfers.
      */
     @Transactional
-    public TransferResponse transfer(TransferRequest request) {
+    public TransferResult transfer(String idempotencyKey, TransferRequest request) {
+        validateKey(idempotencyKey);
+        String fingerprint = request.fingerprint();
+
+        boolean firstTime = idempotencyRepository.tryInsert(idempotencyKey, fingerprint) == 1;
+        if (!firstTime) {
+            return replay(idempotencyKey, fingerprint);
+        }
+
+        TransferResponse response = executeTransfer(request);
+        idempotencyRepository.attachTransfer(idempotencyKey, response.transferId());
+        return new TransferResult(response, false);
+    }
+
+    private TransferResult replay(String key, String fingerprint) {
+        // Under READ COMMITTED each statement sees the latest committed data, so this
+        // finds the row even if another transaction committed it a moment ago.
+        IdempotencyRecord record = idempotencyRepository.findById(key)
+                .orElseThrow(() -> new IllegalStateException("Idempotency key vanished: " + key));
+
+        if (!record.getRequestHash().equals(fingerprint)) {
+            throw new IdempotencyKeyReusedException(key);
+        }
+        if (record.getTransferId() == null) {
+            // Can't happen: the key and its transfer are committed in the same transaction.
+            throw new IllegalStateException("Idempotency key " + key + " has no transfer");
+        }
+        return new TransferResult(loadTransfer(record.getTransferId()), true);
+    }
+
+    private TransferResponse executeTransfer(TransferRequest request) {
         UUID fromId = request.fromAccountId();
         UUID toId = request.toAccountId();
         long amount = request.amount();
@@ -72,9 +115,32 @@ public class TransferService {
                 new Posting(entry.getId(), toId, amount)
         ));
 
-        // The balance changes on `from` and `to` are saved automatically at commit,
-        // because Hibernate tracks changes to entities loaded in this transaction.
         return new TransferResponse(entry.getId(), fromId, toId, amount,
                 from.getCurrency(), entry.getDescription(), entry.getCreatedAt());
+    }
+
+    /** Rebuilds a transfer's response from the ledger, for replays. */
+    private TransferResponse loadTransfer(UUID transferId) {
+        JournalEntry entry = journalEntryRepository.findById(transferId)
+                .orElseThrow(() -> new IllegalStateException("Missing journal entry " + transferId));
+        List<Posting> postings = postingRepository.findByJournalEntryIdOrderByAmountAsc(transferId);
+        Posting debit = postings.get(0);   // negative amount: the "from" side
+        Posting credit = postings.get(1);  // positive amount: the "to" side
+        String currency = accountRepository.findById(debit.getAccountId())
+                .orElseThrow(() -> new AccountNotFoundException(debit.getAccountId()))
+                .getCurrency();
+
+        return new TransferResponse(entry.getId(), debit.getAccountId(), credit.getAccountId(),
+                credit.getAmount(), currency, entry.getDescription(), entry.getCreatedAt());
+    }
+
+    private static void validateKey(String key) {
+        if (key == null || key.isBlank()) {
+            throw new InvalidIdempotencyKeyException("Idempotency-Key header must not be blank");
+        }
+        if (key.length() > MAX_KEY_LENGTH) {
+            throw new InvalidIdempotencyKeyException(
+                    "Idempotency-Key must be at most " + MAX_KEY_LENGTH + " characters");
+        }
     }
 }

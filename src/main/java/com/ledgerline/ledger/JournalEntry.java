@@ -8,6 +8,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 /** One journal entry per transfer. Groups the postings that belong together. */
@@ -30,7 +31,9 @@ public class JournalEntry {
 
     public JournalEntry(String description) {
         this.description = description;
-        this.createdAt = Instant.now();
+        // PostgreSQL stores microseconds. Truncating here means a replayed response
+        // (read back from the database) is identical to the original one.
+        this.createdAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
     }
 
     public UUID getId() { return id; }

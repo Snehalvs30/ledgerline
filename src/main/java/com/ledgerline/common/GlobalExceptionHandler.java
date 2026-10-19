@@ -2,6 +2,8 @@ package com.ledgerline.common;
 
 import com.ledgerline.account.AccountNotFoundException;
 import com.ledgerline.account.InsufficientFundsException;
+import com.ledgerline.idempotency.IdempotencyKeyReusedException;
+import com.ledgerline.idempotency.InvalidIdempotencyKeyException;
 import com.ledgerline.transfer.InvalidTransferException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -20,31 +22,35 @@ import java.util.Map;
 /**
  * Turns exceptions into consistent JSON errors (RFC 9457 "problem details").
  * Extending ResponseEntityExceptionHandler also covers Spring's built-in errors,
- * such as malformed JSON or an invalid UUID in the URL (both return 400).
+ * such as malformed JSON, an invalid UUID in the URL, or a missing header (all 400).
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(AccountNotFoundException.class)
     public ProblemDetail handleAccountNotFound(AccountNotFoundException ex) {
-        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
-        problem.setTitle("Account not found");
-        return problem;
+        return problem(HttpStatus.NOT_FOUND, "Account not found", ex);
     }
 
-    /** 422: the request is valid JSON, but the business rules reject it. */
+    /** 422: the request is well-formed, but the business rules reject it. */
     @ExceptionHandler(InsufficientFundsException.class)
     public ProblemDetail handleInsufficientFunds(InsufficientFundsException ex) {
-        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_CONTENT, ex.getMessage());
-        problem.setTitle("Insufficient funds");
-        return problem;
+        return problem(HttpStatus.UNPROCESSABLE_CONTENT, "Insufficient funds", ex);
     }
 
     @ExceptionHandler(InvalidTransferException.class)
     public ProblemDetail handleInvalidTransfer(InvalidTransferException ex) {
-        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_CONTENT, ex.getMessage());
-        problem.setTitle("Invalid transfer");
-        return problem;
+        return problem(HttpStatus.UNPROCESSABLE_CONTENT, "Invalid transfer", ex);
+    }
+
+    @ExceptionHandler(IdempotencyKeyReusedException.class)
+    public ProblemDetail handleKeyReused(IdempotencyKeyReusedException ex) {
+        return problem(HttpStatus.UNPROCESSABLE_CONTENT, "Idempotency key reused", ex);
+    }
+
+    @ExceptionHandler(InvalidIdempotencyKeyException.class)
+    public ProblemDetail handleInvalidKey(InvalidIdempotencyKeyException ex) {
+        return problem(HttpStatus.BAD_REQUEST, "Invalid idempotency key", ex);
     }
 
     /** Adds a field-by-field "errors" map to validation failures, e.g. {"currency": "must be ..."}. */
@@ -61,5 +67,11 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         problem.setTitle("Validation failed");
         problem.setProperty("errors", errors);
         return handleExceptionInternal(ex, problem, headers, status, request);
+    }
+
+    private static ProblemDetail problem(HttpStatus status, String title, Exception ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, ex.getMessage());
+        problem.setTitle(title);
+        return problem;
     }
 }
