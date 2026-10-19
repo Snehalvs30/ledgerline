@@ -58,7 +58,32 @@ public class Account {
         return new Account(name, AccountType.CUSTOMER, currency);
     }
 
-    // Getters only. Balance changes will go through transfers (Day 2), never a public setter.
+    /**
+     * Takes money out of this account. Only call this while holding a row lock
+     * on the account (see AccountRepository.lockAllByIdOrdered).
+     * CUSTOMER accounts can't go below zero; SYSTEM accounts can.
+     */
+    public void debit(long amount) {
+        requirePositive(amount);
+        if (type == AccountType.CUSTOMER && balance < amount) {
+            throw new InsufficientFundsException(id, balance, amount);
+        }
+        balance = Math.subtractExact(balance, amount); // throws on overflow instead of wrapping
+    }
+
+    /** Puts money into this account. Same locking rule as debit. */
+    public void credit(long amount) {
+        requirePositive(amount);
+        balance = Math.addExact(balance, amount);
+    }
+
+    private static void requirePositive(long amount) {
+        if (amount <= 0) {
+            throw new IllegalArgumentException("Amount must be positive, got " + amount);
+        }
+    }
+
+    // Getters only. Balances change only through debit/credit inside a transfer.
     public UUID getId() { return id; }
     public String getName() { return name; }
     public AccountType getType() { return type; }

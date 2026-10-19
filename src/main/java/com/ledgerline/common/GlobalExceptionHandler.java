@@ -1,6 +1,8 @@
 package com.ledgerline.common;
 
 import com.ledgerline.account.AccountNotFoundException;
+import com.ledgerline.account.InsufficientFundsException;
+import com.ledgerline.transfer.InvalidTransferException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -27,6 +29,21 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     public ProblemDetail handleAccountNotFound(AccountNotFoundException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
         problem.setTitle("Account not found");
+        return problem;
+    }
+
+    /** 422: the request is valid JSON, but the business rules reject it. */
+    @ExceptionHandler(InsufficientFundsException.class)
+    public ProblemDetail handleInsufficientFunds(InsufficientFundsException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_CONTENT, ex.getMessage());
+        problem.setTitle("Insufficient funds");
+        return problem;
+    }
+
+    @ExceptionHandler(InvalidTransferException.class)
+    public ProblemDetail handleInvalidTransfer(InvalidTransferException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_CONTENT, ex.getMessage());
+        problem.setTitle("Invalid transfer");
         return problem;
     }
 
