@@ -17,7 +17,7 @@ class AccountApiTest extends IntegrationTest {
         assertThat(response.getStatusCode().value()).isEqualTo(201);
         AccountResponse account = read(response, AccountResponse.class);
         assertThat(account.id()).isNotNull();
-        assertThat(account.name()).isEqualTo("Alice");
+        assertThat(account.name()).isEqualTo("Bob");
         assertThat(account.type()).isEqualTo(AccountType.CUSTOMER);
         assertThat(account.currency()).isEqualTo("USD");
         assertThat(account.balance()).isZero();
