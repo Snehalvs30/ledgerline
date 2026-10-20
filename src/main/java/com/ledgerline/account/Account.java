@@ -10,6 +10,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
+import java.time.temporal.ChronoUnit;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -50,7 +51,8 @@ public class Account {
         this.type = type;
         this.currency = currency;
         this.balance = 0L;
-        this.createdAt = Instant.now();
+//        this.createdAt = Instant.now();
+        this.createdAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
     }
 
     /** The only way the API creates accounts: CUSTOMER type, zero balance. */
