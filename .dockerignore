@@ -1,0 +1,11 @@
+# Keep the build context small: only .mvn, mvnw, pom.xml and src are needed.
+target/
+.git/
+.github/
+.idea/
+*.iml
+docs/
+monitoring/
+loadtest/
+k8s/
+*.md
