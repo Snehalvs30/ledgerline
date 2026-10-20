@@ -17,6 +17,8 @@ spring:
       hibernate:
         jdbc:
           time_zone: UTC
+          batch_size: 100
+          order_updates: true
 
   flyway:
     enabled: true
@@ -42,16 +44,21 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       show-details: always   # fine for local dev; restrict before deploying
+  metrics:
+    distribution:
+      # Record latency histograms so Prometheus can compute p95/p99 across requests.
+      percentiles-histogram:
+        "[http.server.requests]": true
 
 ledgerline:
   outbox:
     topic: ledger.transfers
     poll-interval-ms: 500
-    batch-size: 100
+    batch-size: 500
   reconciliation:
     initial-delay-ms: 10000
     interval-ms: 60000

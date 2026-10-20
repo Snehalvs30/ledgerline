@@ -24,5 +24,31 @@ services:
     ports:
       - "9092:9092"
 
+  # Scrapes the app's /actuator/prometheus endpoint every 5 seconds.
+  prometheus:
+    image: prom/prometheus:v3.4.0
+    container_name: ledgerline-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # lets the container reach the app on your Mac
+
+  # Dashboards at http://localhost:3000 (no login locally).
+  grafana:
+    image: grafana/grafana:12.0.0
+    container_name: ledgerline-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin      # local development only
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+
 volumes:
   pgdata:

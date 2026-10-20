@@ -1,0 +1,48 @@
+█ THRESHOLDS
+
+    checks
+    ✓ 'rate>0.99' rate=99.97%
+
+    http_req_duration{name:transfer}
+    ✓ 'p(95)<500' p(95)=78.08ms
+
+    http_req_failed
+    ✓ 'rate<0.01' rate=0.02%
+
+
+  █ TOTAL RESULTS
+
+    checks_total.......................: 80654  614.908092/s
+    checks_succeeded...................: 99.97% 80632 out of 80654
+    checks_failed......................: 0.02%  22 out of 80654
+
+    ✓ account created
+    ✓ account funded
+    ✗ transfer is 201 or 422
+      ↳  99% — ✓ 73263 / ✗ 20
+    ✗ retry is replayed, not charged again
+      ↳  99% — ✓ 7328 / ✗ 2
+    ✓ ledger still balanced after load
+
+    HTTP
+    http_req_duration.......................................................: avg=29.97ms min=0s     med=19.52ms max=1.99s  p(90)=51.96ms p(95)=76.55ms
+      { expected_response:true }............................................: avg=29.95ms min=700µs  med=19.52ms max=1.16s  p(90)=51.97ms p(95)=76.55ms
+      { name:transfer }.....................................................: avg=30.83ms min=0s     med=20.24ms max=1.16s  p(90)=53.05ms p(95)=78.08ms
+    http_req_failed.........................................................: 0.02% 23 out of 80654
+    http_reqs...............................................................: 80654 614.908092/s
+
+    EXECUTION
+    iteration_duration......................................................: avg=46.43ms min=1.46ms med=21.47ms max=30.34s p(90)=57.72ms p(95)=86.2ms
+    iterations..............................................................: 73283 558.711405/s
+    vus.....................................................................: 0     min=0           max=50
+    vus_max.................................................................: 50    min=50          max=50
+
+    NETWORK
+    data_received...........................................................: 33 MB 250 kB/s
+    data_sent...............................................................: 26 MB 198 kB/s
+
+
+
+
+running (2m11.2s), 00/50 VUs, 73283 complete and 0 interrupted iterations
+transfers ✓ [ 100% ] 00/50 VUs  2m0s

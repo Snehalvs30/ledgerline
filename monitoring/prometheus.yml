@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: ledgerline
+    metrics_path: /actuator/prometheus
+    static_configs:
+      # The app runs on your Mac (from IntelliJ), not in Docker.
+      - targets: ["host.docker.internal:8080"]
