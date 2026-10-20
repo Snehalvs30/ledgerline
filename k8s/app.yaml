@@ -1,0 +1,137 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ledgerline-config
+data:
+  SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ledgerline
+  DB_USERNAME: ledgerline
+  SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  # /actuator/health/liveness and /actuator/health/readiness for the probes below.
+  MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: "true"
+  # Not ready (taken out of the Service) while the database is unreachable.
+  MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: "readinessState,db"
+  # Don't reveal database details on the public health endpoint.
+  MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS: "never"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ledgerline
+spec:
+  # Two instances on purpose: the outbox relay (FOR UPDATE SKIP LOCKED), Flyway
+  # (PostgreSQL advisory lock) and the Kafka consumer group all coordinate safely.
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0    # never drop below 2 running pods during a deploy
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: ledgerline
+  template:
+    metadata:
+      labels:
+        app: ledgerline
+    spec:
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 30   # time for in-flight requests to finish
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Wait for the database instead of crash-looping until it's up.
+        - name: wait-for-postgres
+          image: postgres:17
+          command: ["sh", "-c", "until pg_isready -h postgres -p 5432 -U ledgerline; do echo waiting for postgres; sleep 2; done"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: app
+          image: ghcr.io/snehalvs30/ledgerline:latest   # CI replaces :latest with the exact commit SHA
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: ledgerline-config
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ledgerline-secrets
+                  key: db-password
+            - name: LEDGERLINE_SECURITY_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: ledgerline-secrets
+                  key: jwt-secret
+          # Requests reserve capacity for scheduling. A memory limit stops a leak from
+          # taking down the node; no CPU limit, to avoid throttling the JVM's spikes.
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 768Mi
+          # Up to 3 minutes to start (JVM + Flyway) before the other probes take over.
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 36
+          # Ready = receives traffic. Fails while the DB is down; the pod stays alive.
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+          # Alive = not stuck. Failing this restarts the container.
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp             # the JVM and Tomcat need a writable /tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ledgerline
+spec:
+  selector:
+    app: ledgerline
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+# Voluntary disruptions (node drains, cluster upgrades) must leave at least one pod running.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ledgerline
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: ledgerline

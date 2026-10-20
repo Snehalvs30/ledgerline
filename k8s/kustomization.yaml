@@ -1,0 +1,13 @@
+# Deploy everything with:  kubectl apply -k k8s/
+# The "ledgerline-secrets" Secret is NOT in Git. Create it first (see k8s/README.md).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: ledgerline
+resources:
+  - namespace.yaml
+  - postgres.yaml
+  - kafka.yaml
+  - app.yaml
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: ledgerline
