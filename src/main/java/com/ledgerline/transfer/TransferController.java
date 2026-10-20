@@ -4,9 +4,12 @@ import com.ledgerline.account.AccountNotFoundException;
 import com.ledgerline.account.InsufficientFundsException;
 import com.ledgerline.idempotency.IdempotencyKeyReusedException;
 import com.ledgerline.idempotency.InvalidIdempotencyKeyException;
+import com.ledgerline.security.Caller;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -32,12 +35,16 @@ public class TransferController {
      */
     @PostMapping
     public ResponseEntity<TransferResponse> create(@RequestHeader("Idempotency-Key") String idempotencyKey,
-                                                   @Valid @RequestBody TransferRequest request) {
+                                                   @Valid @RequestBody TransferRequest request,
+                                                   @AuthenticationPrincipal Jwt jwt) {
         TransferResult result;
         try {
-            result = transferService.transfer(idempotencyKey, request);
+            result = transferService.transfer(idempotencyKey, request, Caller.from(jwt));
         } catch (InsufficientFundsException e) {
             metrics.recordOutcome("insufficient_funds");
+            throw e;
+        } catch (TransferForbiddenException e) {
+            metrics.recordOutcome("forbidden");
             throw e;
         } catch (InvalidTransferException | AccountNotFoundException e) {
             metrics.recordOutcome("rejected");

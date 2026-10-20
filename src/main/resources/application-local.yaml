@@ -1,0 +1,5 @@
+# Settings for running on your own machine. Activate with SPRING_PROFILES_ACTIVE=local.
+ledgerline:
+  security:
+    dev-tokens:
+      enabled: true

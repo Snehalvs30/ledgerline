@@ -79,6 +79,7 @@ services:
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ledgerline
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      SPRING_PROFILES_ACTIVE: local
     depends_on:
       postgres:
         condition: service_healthy

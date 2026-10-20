@@ -106,4 +106,65 @@ class TransferApiTest extends IntegrationTest {
 
         assertThat(response.getStatusCode().value()).isEqualTo(400);
     }
+
+    // ---- Authorization -----------------------------------------------------------
+
+    @Test
+    void cannotSpendFromSomeoneElsesAccount() {
+        AccountResponse victim = createAccount("Victim", "USD");
+        deposit(victim.id(), 5_000);
+        String attackerToken = tokenFor("attacker-" + UUID.randomUUID(), USER_SCOPES);
+        AccountResponse attackersAccount = createAccountAs(attackerToken, "Attacker", "USD");
+
+        ResponseEntity<String> response = postTransferAs(attackerToken, UUID.randomUUID().toString(),
+                new TransferRequest(victim.id(), attackersAccount.id(), 5_000L, null));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(403);
+        assertThat(balanceOf(victim.id())).isEqualTo(5_000);
+        assertThat(balanceOf(attackersAccount.id())).isZero();
+    }
+
+    @Test
+    void canPayIntoSomeoneElsesAccount() {
+        AccountResponse mine = createAccount("Mine", "USD");
+        deposit(mine.id(), 2_000);
+        String friendsToken = tokenFor("friend-" + UUID.randomUUID(), USER_SCOPES);
+        AccountResponse friendsAccount = createAccountAs(friendsToken, "Friend", "USD");
+
+        assertThat(transfer(mine.id(), friendsAccount.id(), 500).getStatusCode().value()).isEqualTo(201);
+        assertThat(balanceOf(friendsAccount.id())).isEqualTo(500);
+    }
+
+    @Test
+    void customersCannotMintMoneyFromTheFundingAccount() {
+        AccountResponse mine = createAccount("Mine", "USD");
+
+        ResponseEntity<String> response = postTransfer(UUID.randomUUID().toString(),
+                new TransferRequest(FUNDING_ACCOUNT_ID, mine.id(), 1_000_000L, null));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(403);
+        assertThat(balanceOf(mine.id())).isZero();
+    }
+
+    @Test
+    void idempotencyKeysAreScopedPerCaller() {
+        // Two different users pick the same key: each gets their own transfer.
+        String sharedKey = "shared-key-" + UUID.randomUUID();
+        AccountResponse aliceFrom = createAccount("Alice", "USD");
+        AccountResponse aliceTo = createAccount("Alice savings", "USD");
+        deposit(aliceFrom.id(), 1_000);
+        String bobToken = tokenFor("bob-" + UUID.randomUUID(), USER_SCOPES);
+        AccountResponse bobFrom = createAccountAs(bobToken, "Bob", "USD");
+        AccountResponse bobTo = createAccountAs(bobToken, "Bob savings", "USD");
+        deposit(bobFrom.id(), 1_000);
+
+        ResponseEntity<String> alice = postTransfer(sharedKey,
+                new TransferRequest(aliceFrom.id(), aliceTo.id(), 100L, null));
+        ResponseEntity<String> bob = postTransferAs(bobToken, sharedKey,
+                new TransferRequest(bobFrom.id(), bobTo.id(), 200L, null));
+
+        assertThat(alice.getHeaders().getFirst("Idempotent-Replayed")).isEqualTo("false");
+        assertThat(bob.getHeaders().getFirst("Idempotent-Replayed")).isEqualTo("false");
+        assertThat(balanceOf(bobTo.id())).isEqualTo(200);
+    }
 }

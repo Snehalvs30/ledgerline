@@ -5,6 +5,7 @@ import com.ledgerline.account.InsufficientFundsException;
 import com.ledgerline.idempotency.IdempotencyKeyReusedException;
 import com.ledgerline.idempotency.InvalidIdempotencyKeyException;
 import com.ledgerline.transfer.InvalidTransferException;
+import com.ledgerline.transfer.TransferForbiddenException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -23,6 +24,7 @@ import java.util.Map;
  * Turns exceptions into consistent JSON errors (RFC 9457 "problem details").
  * Extending ResponseEntityExceptionHandler also covers Spring's built-in errors,
  * such as malformed JSON, an invalid UUID in the URL, or a missing header (all 400).
+ * Missing or invalid tokens (401) and missing scopes (403) are handled by Spring Security.
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
@@ -30,6 +32,11 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(AccountNotFoundException.class)
     public ProblemDetail handleAccountNotFound(AccountNotFoundException ex) {
         return problem(HttpStatus.NOT_FOUND, "Account not found", ex);
+    }
+
+    @ExceptionHandler(TransferForbiddenException.class)
+    public ProblemDetail handleTransferForbidden(TransferForbiddenException ex) {
+        return problem(HttpStatus.FORBIDDEN, "Forbidden", ex);
     }
 
     /** 422: the request is well-formed, but the business rules reject it. */

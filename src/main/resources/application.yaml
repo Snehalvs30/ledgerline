@@ -18,7 +18,7 @@ spring:
         jdbc:
           time_zone: UTC
           batch_size: 100
-          order_updates: true
+        order_updates: true
 
   flyway:
     enabled: true
@@ -62,3 +62,13 @@ ledgerline:
   reconciliation:
     initial-delay-ms: 10000
     interval-ms: 60000
+  security:
+    # HS256 signing key (at least 32 bytes). This default is for local development ONLY.
+    # Every real environment must override it: LEDGERLINE_SECURITY_JWT_SECRET=...
+    jwt-secret: ${LEDGERLINE_SECURITY_JWT_SECRET:local-dev-secret-change-me-0123456789abcdef}
+    issuer: ledgerline-dev
+    audience: ledgerline-api
+    token-ttl: PT1H
+    dev-tokens:
+      # POST /dev/token mints tokens for local testing. Off unless the "local" profile is on.
+      enabled: false

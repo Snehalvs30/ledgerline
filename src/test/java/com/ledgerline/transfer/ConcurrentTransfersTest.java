@@ -90,9 +90,7 @@ class ConcurrentTransfersTest extends IntegrationTest {
         assertThat(debitPostings).isEqualTo(countsByStatus.getOrDefault(201, 0L));
 
         // And the whole ledger still reconciles.
-        ReconciliationReport report = read(
-                http.get().uri("/reconciliation").retrieve().toEntity(String.class),
-                ReconciliationReport.class);
+        ReconciliationReport report = reconcile();
         assertThat(report.balanced()).as("reconciliation report: %s", report).isTrue();
     }
 

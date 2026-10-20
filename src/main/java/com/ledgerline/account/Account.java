@@ -10,9 +10,9 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
-import java.time.temporal.ChronoUnit;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 @Entity
@@ -42,22 +42,31 @@ public class Account {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    /** The JWT subject that created this account. NULL for SYSTEM accounts. */
+    @Column(name = "owner_id", length = 100, updatable = false)
+    private String ownerId;
+
     // Required by JPA. Not for application code.
     protected Account() {
     }
 
-    private Account(String name, AccountType type, String currency) {
+    private Account(String name, AccountType type, String currency, String ownerId) {
         this.name = name;
         this.type = type;
         this.currency = currency;
+        this.ownerId = ownerId;
         this.balance = 0L;
-//        this.createdAt = Instant.now();
+        // PostgreSQL stores microseconds; truncate so memory and database always agree.
         this.createdAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
     }
 
-    /** The only way the API creates accounts: CUSTOMER type, zero balance. */
-    public static Account newCustomerAccount(String name, String currency) {
-        return new Account(name, AccountType.CUSTOMER, currency);
+    /** The only way the API creates accounts: CUSTOMER type, zero balance, owned by the caller. */
+    public static Account newCustomerAccount(String name, String currency, String ownerId) {
+        return new Account(name, AccountType.CUSTOMER, currency, ownerId);
+    }
+
+    public boolean isOwnedBy(String subject) {
+        return ownerId != null && ownerId.equals(subject);
     }
 
     /**
@@ -92,4 +101,5 @@ public class Account {
     public String getCurrency() { return currency; }
     public long getBalance() { return balance; }
     public Instant getCreatedAt() { return createdAt; }
+    public String getOwnerId() { return ownerId; }
 }

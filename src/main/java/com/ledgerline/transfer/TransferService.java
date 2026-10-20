@@ -3,6 +3,7 @@ package com.ledgerline.transfer;
 import com.ledgerline.account.Account;
 import com.ledgerline.account.AccountNotFoundException;
 import com.ledgerline.account.AccountRepository;
+import com.ledgerline.account.AccountType;
 import com.ledgerline.idempotency.IdempotencyKeyReusedException;
 import com.ledgerline.idempotency.IdempotencyRecord;
 import com.ledgerline.idempotency.IdempotencyRecordRepository;
@@ -12,6 +13,7 @@ import com.ledgerline.ledger.JournalEntryRepository;
 import com.ledgerline.ledger.Posting;
 import com.ledgerline.ledger.PostingRepository;
 import com.ledgerline.outbox.OutboxWriter;
+import com.ledgerline.security.Caller;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,7 +26,8 @@ import java.util.stream.Collectors;
 @Service
 public class TransferService {
 
-    private static final int MAX_KEY_LENGTH = 255;
+    // Keys are stored as "<subject>:<key>" in a 255-character column; the subject is at most 100.
+    private static final int MAX_KEY_LENGTH = 128;
 
     private final AccountRepository accountRepository;
     private final JournalEntryRepository journalEntryRepository;
@@ -53,17 +56,20 @@ public class TransferService {
      * We only remember successful transfers.
      */
     @Transactional
-    public TransferResult transfer(String idempotencyKey, TransferRequest request) {
+    public TransferResult transfer(String idempotencyKey, TransferRequest request, Caller caller) {
         validateKey(idempotencyKey);
+        // Keys are per caller: two clients that happen to pick the same key never collide,
+        // and nobody can replay (or probe) another client's transfers by guessing keys.
+        String scopedKey = caller.subject() + ":" + idempotencyKey;
         String fingerprint = request.fingerprint();
 
-        boolean firstTime = idempotencyRepository.tryInsert(idempotencyKey, fingerprint) == 1;
+        boolean firstTime = idempotencyRepository.tryInsert(scopedKey, fingerprint) == 1;
         if (!firstTime) {
-            return replay(idempotencyKey, fingerprint);
+            return replay(scopedKey, fingerprint);
         }
 
-        TransferResponse response = executeTransfer(request);
-        idempotencyRepository.attachTransfer(idempotencyKey, response.transferId());
+        TransferResponse response = executeTransfer(request, caller);
+        idempotencyRepository.attachTransfer(scopedKey, response.transferId());
         queueEvent(response);
         return new TransferResult(response, false);
     }
@@ -75,7 +81,7 @@ public class TransferService {
                 .orElseThrow(() -> new IllegalStateException("Idempotency key vanished: " + key));
 
         if (!record.getRequestHash().equals(fingerprint)) {
-            throw new IdempotencyKeyReusedException(key);
+            throw new IdempotencyKeyReusedException(key.substring(key.indexOf(':') + 1));
         }
         if (record.getTransferId() == null) {
             // Can't happen: the key and its transfer are committed in the same transaction.
@@ -85,7 +91,7 @@ public class TransferService {
         return new TransferResult(loadTransfer(record.getTransferId()), true);
     }
 
-    private TransferResponse executeTransfer(TransferRequest request) {
+    private TransferResponse executeTransfer(TransferRequest request, Caller caller) {
         UUID fromId = request.fromAccountId();
         UUID toId = request.toAccountId();
         long amount = request.amount();
@@ -104,17 +110,21 @@ public class TransferService {
         if (from == null) throw new AccountNotFoundException(fromId);
         if (to == null) throw new AccountNotFoundException(toId);
 
-        // 2. Business rules, checked while holding the locks so nothing changes underneath us.
+        // 2. Authorization: may this caller spend from this account? (Paying INTO
+        //    anyone's account is allowed, like sending money to a friend.)
+        authorizeDebit(from, caller);
+
+        // 3. Business rules, checked while holding the locks so nothing changes underneath us.
         if (!from.getCurrency().equals(to.getCurrency())) {
             throw new InvalidTransferException(
                     "Currency mismatch: " + from.getCurrency() + " to " + to.getCurrency());
         }
 
-        // 3. Move the money. debit() rejects overdrafts on CUSTOMER accounts.
+        // 4. Move the money. debit() rejects overdrafts on CUSTOMER accounts.
         from.debit(amount);
         to.credit(amount);
 
-        // 4. Record it with double entry: two postings that sum to zero.
+        // 5. Record it with double entry: two postings that sum to zero.
         JournalEntry entry = journalEntryRepository.save(new JournalEntry(request.description()));
         postingRepository.saveAll(List.of(
                 new Posting(entry.getId(), fromId, -amount),
@@ -125,7 +135,23 @@ public class TransferService {
                 from.getCurrency(), entry.getDescription(), entry.getCreatedAt());
     }
 
-    /** 5. Queue the event in the outbox, inside this same transaction. */
+    /**
+     * Admins may move money from any account (deposits, corrections).
+     * Everyone else may only spend from CUSTOMER accounts they own.
+     */
+    private static void authorizeDebit(Account from, Caller caller) {
+        if (caller.admin()) {
+            return;
+        }
+        if (from.getType() == AccountType.SYSTEM) {
+            throw new TransferForbiddenException("Only ledger administrators can move money out of system accounts");
+        }
+        if (!from.isOwnedBy(caller.subject())) {
+            throw new TransferForbiddenException("You can only transfer from accounts you own");
+        }
+    }
+
+    /** 6. Queue the event in the outbox, inside this same transaction. */
     private void queueEvent(TransferResponse transfer) {
         UUID eventId = UUID.randomUUID();
         TransferCompletedEvent event = new TransferCompletedEvent(
