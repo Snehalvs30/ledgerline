@@ -22,6 +22,19 @@ spring:
     enabled: true
     locations: classpath:db/migration
 
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      properties:
+        # Fail fast when Kafka is down, so the outbox relay retries on its next run
+        # instead of blocking for the 60-second defaults.
+        max.block.ms: 5000
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 10000
+    consumer:
+      # A brand-new consumer group starts from the oldest event, so nothing is skipped.
+      auto-offset-reset: earliest
+
 server:
   port: 8080
 
@@ -33,3 +46,12 @@ management:
   endpoint:
     health:
       show-details: always   # fine for local dev; restrict before deploying
+
+ledgerline:
+  outbox:
+    topic: ledger.transfers
+    poll-interval-ms: 500
+    batch-size: 100
+  reconciliation:
+    initial-delay-ms: 10000
+    interval-ms: 60000

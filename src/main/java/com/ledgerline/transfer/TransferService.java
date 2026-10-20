@@ -11,6 +11,7 @@ import com.ledgerline.ledger.JournalEntry;
 import com.ledgerline.ledger.JournalEntryRepository;
 import com.ledgerline.ledger.Posting;
 import com.ledgerline.ledger.PostingRepository;
+import com.ledgerline.outbox.OutboxWriter;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,20 +30,23 @@ public class TransferService {
     private final JournalEntryRepository journalEntryRepository;
     private final PostingRepository postingRepository;
     private final IdempotencyRecordRepository idempotencyRepository;
+    private final OutboxWriter outboxWriter;
 
     public TransferService(AccountRepository accountRepository,
                            JournalEntryRepository journalEntryRepository,
                            PostingRepository postingRepository,
-                           IdempotencyRecordRepository idempotencyRepository) {
+                           IdempotencyRecordRepository idempotencyRepository,
+                           OutboxWriter outboxWriter) {
         this.accountRepository = accountRepository;
         this.journalEntryRepository = journalEntryRepository;
         this.postingRepository = postingRepository;
         this.idempotencyRepository = idempotencyRepository;
+        this.outboxWriter = outboxWriter;
     }
 
     /**
-     * Runs in ONE transaction: claiming the key, moving the money and recording the
-     * result are saved together, or not at all.
+     * Runs in ONE transaction: claiming the key, moving the money, recording the
+     * result and queueing the event are saved together, or not at all.
      *
      * If the transfer fails (e.g. insufficient funds), the whole transaction rolls back,
      * including the key. A retry with the same key is then evaluated again from scratch.
@@ -60,6 +64,7 @@ public class TransferService {
 
         TransferResponse response = executeTransfer(request);
         idempotencyRepository.attachTransfer(idempotencyKey, response.transferId());
+        queueEvent(response);
         return new TransferResult(response, false);
     }
 
@@ -76,6 +81,7 @@ public class TransferService {
             // Can't happen: the key and its transfer are committed in the same transaction.
             throw new IllegalStateException("Idempotency key " + key + " has no transfer");
         }
+        // No new event on replay: the original transfer already queued one.
         return new TransferResult(loadTransfer(record.getTransferId()), true);
     }
 
@@ -117,6 +123,16 @@ public class TransferService {
 
         return new TransferResponse(entry.getId(), fromId, toId, amount,
                 from.getCurrency(), entry.getDescription(), entry.getCreatedAt());
+    }
+
+    /** 5. Queue the event in the outbox, inside this same transaction. */
+    private void queueEvent(TransferResponse transfer) {
+        UUID eventId = UUID.randomUUID();
+        TransferCompletedEvent event = new TransferCompletedEvent(
+                eventId, TransferCompletedEvent.TYPE, transfer.transferId(),
+                transfer.fromAccountId(), transfer.toAccountId(), transfer.amount(),
+                transfer.currency(), transfer.description(), transfer.createdAt());
+        outboxWriter.write(eventId, "Transfer", transfer.transferId(), TransferCompletedEvent.TYPE, event);
     }
 
     /** Rebuilds a transfer's response from the ledger, for replays. */

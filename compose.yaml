@@ -16,5 +16,13 @@ services:
       timeout: 3s
       retries: 10
 
+  # Single-node Kafka in KRaft mode (no ZooKeeper). The official image's defaults
+  # listen on localhost:9092, which is what the app connects to.
+  kafka:
+    image: apache/kafka:4.0.0
+    container_name: ledgerline-kafka
+    ports:
+      - "9092:9092"
+
 volumes:
   pgdata:
