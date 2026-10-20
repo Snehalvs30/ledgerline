@@ -28,7 +28,23 @@
 	</scm>
 	<properties>
 		<java.version>21</java.version>
+		<!-- Security overrides: Spring Boot 4.1.1 manages versions with known CVEs.
+     Remove these once a newer Spring Boot release includes the fixed versions. -->
+		<tomcat.version>11.0.25</tomcat.version>
+		<jackson-bom.version>3.1.7</jackson-bom.version>
 	</properties>
+
+	<dependencyManagement>
+		<dependencies>
+			<!-- Transitive dependency of kafka-clients; 1.10.1 has CVE-2026-106451. -->
+			<dependency>
+				<groupId>at.yawk.lz4</groupId>
+				<artifactId>lz4-java</artifactId>
+				<version>1.11.4</version>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
+
 	<dependencies>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
