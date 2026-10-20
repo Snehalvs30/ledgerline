@@ -18,7 +18,11 @@ FROM eclipse-temurin:21-jre
 WORKDIR /app
 
 # Never run as root inside the container.
-RUN groupadd --system ledgerline && useradd --system --gid ledgerline ledgerline
+#RUN groupadd --system ledgerline && useradd --system --gid ledgerline ledgerline
+# Pebble (Canonical's service manager) ships in the base image, but this app never
+# uses it, and it was built with a Go version that has known HIGH CVEs. Remove it.
+RUN rm -f /usr/bin/pebble \
+ && groupadd --system ledgerline && useradd --system --gid ledgerline ledgerline
 COPY --from=build /workspace/target/*.jar app.jar
 USER ledgerline
 
