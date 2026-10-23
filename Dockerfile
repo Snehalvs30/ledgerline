@@ -1,11 +1,10 @@
 # ---- Stage 1: build the jar ---------------------------------------------------
-#FROM eclipse-temurin:21-jdk AS build
 # The jar is the same for every CPU, so build it natively (no emulation), even
 # when the final image targets another architecture.
 FROM --platform=$BUILDPLATFORM eclipse-temurin:21-jdk AS build
 WORKDIR /workspace
 
-COPY .mvn .mvnFROM eclipse-temurin:21-jdk AS build
+COPY .mvn .mvn
 COPY mvnw pom.xml ./
 COPY src src
 # Tests already ran in CI (they need Docker for Testcontainers, which isn't available here).
